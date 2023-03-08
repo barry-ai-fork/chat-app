@@ -1,0 +1,36 @@
+@import "./mixins";
+
+.icon-list{
+
+  >div{
+    margin:16px 16px;
+    display: flex;
+    align-content: center;
+    justify-content: center;
+    flex-direction: column;
+    i{
+      display: inline-flex;
+      width: 16px;
+      align-items: center;
+      justify-content: center;
+    }
+  }
+}
+
+.flex{
+  display: flex;
+}
+
+.flex-row{
+  display: flex;
+  flex-direction: row;
+}
+
+.flex-column{
+  display: flex;
+  flex-direction: column;
+}
+
+.position_relative{
+  position: relative;
+}

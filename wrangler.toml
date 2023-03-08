@@ -1,0 +1,9 @@
+name = "worker-chat-app" # todo
+main = "./worker/index.js"
+compatibility_date = "2022-05-03"
+
+#[build]
+#command = "npm run wr:build:prod"
+
+[site]
+bucket = "./dist"

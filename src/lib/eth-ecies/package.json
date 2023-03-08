@@ -1,0 +1,25 @@
+{
+  "name": "eth-ecies",
+  "version": "1.0.6",
+  "description": "ECIES encrypt/decrypt library for Ethereum",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "keywords": [],
+  "author": "libertylocked",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/libertylocked/eth-ecies"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "elliptic": "^6.5.4",
+    "safe-buffer": "^5.2.1"
+  },
+  "devDependencies": {
+    "chai": "^4.3.4",
+    "ethereumjs-util": "^7.1.0",
+    "mocha": "^9.1.0"
+  }
+}

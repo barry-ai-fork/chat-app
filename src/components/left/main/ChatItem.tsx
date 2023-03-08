@@ -1,0 +1,413 @@
+import React, {
+  FC, memo, useCallback, useLayoutEffect, useMemo, useRef,
+} from '../../../lib/teact/teact';
+import { getActions, getGlobal, withGlobal } from '../../../global';
+
+import useLang, { LangFn } from '../../../hooks/useLang';
+
+import {
+  ApiChat,
+  ApiFormattedText,
+  ApiMessage,
+  ApiMessageOutgoingStatus,
+  ApiUser,
+  ApiUserStatus,
+  MAIN_THREAD_ID,
+} from '../../../api/types';
+
+import { ANIMATION_END_DELAY } from '../../../config';
+import { IS_SINGLE_COLUMN_LAYOUT } from '../../../util/environment';
+import {
+  getChatTitle,
+  getMessageAction,
+  getMessageMediaHash,
+  getMessageMediaThumbDataUri,
+  getMessageRoundVideo,
+  getMessageSenderName,
+  getMessageSticker,
+  getMessageVideo,
+  getPrivateChatUserId,
+  isActionMessage,
+  isChatChannel,
+  isUserId,
+  selectIsChatMuted,
+} from '../../../global/helpers';
+import {
+  selectChat,
+  selectChatMessage,
+  selectCurrentMessageList,
+  selectDraft,
+  selectNotifyExceptions,
+  selectNotifySettings,
+  selectOutgoingStatus,
+  selectUser,
+  selectUserStatus,
+} from '../../../global/selectors';
+import { renderActionMessageText } from '../../common/helpers/renderActionMessageText';
+import renderText from '../../common/helpers/renderText';
+import { fastRaf } from '../../../util/schedulers';
+import buildClassName from '../../../util/buildClassName';
+import useEnsureMessage from '../../../hooks/useEnsureMessage';
+import useChatContextActions from '../../../hooks/useChatContextActions';
+import useFlag from '../../../hooks/useFlag';
+import useMedia from '../../../hooks/useMedia';
+import { ChatAnimationTypes } from './hooks';
+import { renderMessageSummary } from '../../common/helpers/renderMessageText';
+
+import Avatar from '../../common/Avatar';
+import VerifiedIcon from '../../common/VerifiedIcon';
+import TypingStatus from '../../common/TypingStatus';
+import LastMessageMeta from '../../common/LastMessageMeta';
+import DeleteChatModal from '../../common/DeleteChatModal';
+import ListItem from '../../ui/ListItem';
+import Badge from './Badge';
+import ChatFolderModal from '../ChatFolderModal.async';
+import ChatCallStatus from './ChatCallStatus';
+
+import './Chat.scss';
+
+type OwnProps = {
+  style?: string;
+  chatId: string;
+  folderId?: number;
+  orderDiff: number;
+  animationType: ChatAnimationTypes;
+  isPinned?: boolean;
+};
+
+type StateProps = {
+  chat?: ApiChat;
+  isMuted?: boolean;
+  user?: ApiUser;
+  userStatus?: ApiUserStatus;
+  actionTargetUserIds?: string[];
+  actionTargetMessage?: ApiMessage;
+  actionTargetChatId?: string;
+  lastMessageSender?: ApiUser;
+  lastMessageOutgoingStatus?: ApiMessageOutgoingStatus;
+  draft?: ApiFormattedText;
+  animationLevel?: number;
+  isSelected?: boolean;
+  canScrollDown?: boolean;
+  canChangeFolder?: boolean;
+  lastSyncTime?: number;
+};
+
+const ANIMATION_DURATION = 200;
+
+const ChatItem: FC<OwnProps & StateProps> = ({
+  style,
+  chatId,
+  folderId,
+  orderDiff,
+  animationType,
+  isPinned,
+  chat,
+  isMuted,
+  user,
+  userStatus,
+  actionTargetUserIds,
+  lastMessageSender,
+  lastMessageOutgoingStatus,
+  actionTargetMessage,
+  actionTargetChatId,
+  draft,
+  animationLevel,
+  isSelected,
+  canScrollDown,
+  canChangeFolder,
+  lastSyncTime,
+}) => {
+  const {
+    openChat,
+    focusLastMessage,
+  } = getActions();
+
+  // eslint-disable-next-line no-null/no-null
+  const ref = useRef<HTMLDivElement>(null);
+
+  const [isDeleteModalOpen, openDeleteModal, closeDeleteModal] = useFlag();
+  const [isChatFolderModalOpen, openChatFolderModal, closeChatFolderModal] = useFlag();
+  const [shouldRenderDeleteModal, markRenderDeleteModal, unmarkRenderDeleteModal] = useFlag();
+  const [shouldRenderChatFolderModal, markRenderChatFolderModal, unmarkRenderChatFolderModal] = useFlag();
+
+  const {
+    lastMessage,
+    typingStatus,
+  } = chat || {};
+  const isAction = lastMessage && isActionMessage(lastMessage);
+  useEnsureMessage(chatId, isAction ? lastMessage!.replyToMessageId : undefined, actionTargetMessage);
+
+  const mediaThumbnail = lastMessage && !getMessageSticker(lastMessage)
+    ? getMessageMediaThumbDataUri(lastMessage)
+    : undefined;
+  const mediaBlobUrl = useMedia(lastMessage ? getMessageMediaHash(lastMessage, 'micro') : undefined);
+  const isRoundVideo = Boolean(lastMessage && getMessageRoundVideo(lastMessage));
+
+  const actionTargetUsers = useMemo(() => {
+    if (!actionTargetUserIds) {
+      return undefined;
+    }
+
+    // No need for expensive global updates on users, so we avoid them
+    const usersById = getGlobal().users.byId;
+    return actionTargetUserIds.map((userId) => usersById[userId])
+      .filter<ApiUser>(Boolean as any);
+  }, [actionTargetUserIds]);
+
+  // Sets animation excess values when `orderDiff` changes and then resets excess values to animate.
+  useLayoutEffect(() => {
+    const element = ref.current;
+
+    if (animationLevel === 0 || !element) {
+      return;
+    }
+
+    // TODO Refactor animation: create `useListAnimation` that owns `orderDiff` and `animationType`
+    if (animationType === ChatAnimationTypes.Opacity) {
+      element.style.opacity = '0';
+
+      fastRaf(() => {
+        element.classList.add('animate-opacity');
+        element.style.opacity = '1';
+      });
+    } else if (animationType === ChatAnimationTypes.Move) {
+      element.style.transform = `translate3d(0, ${-orderDiff * 100}%, 0)`;
+
+      fastRaf(() => {
+        element.classList.add('animate-transform');
+        element.style.transform = '';
+      });
+    } else {
+      return;
+    }
+
+    setTimeout(() => {
+      fastRaf(() => {
+        element.classList.remove('animate-opacity', 'animate-transform');
+        element.style.opacity = '';
+        element.style.transform = '';
+      });
+    }, ANIMATION_DURATION + ANIMATION_END_DELAY);
+  }, [animationLevel, orderDiff, animationType]);
+
+  const handleClick = useCallback(() => {
+    openChat({
+      id: chatId,
+      shouldReplaceHistory: true,
+    });
+
+    if (isSelected && canScrollDown) {
+      focusLastMessage();
+    }
+  }, [
+    isSelected,
+    canScrollDown,
+    openChat,
+    chatId,
+    focusLastMessage,
+  ]);
+
+  function handleDelete() {
+    markRenderDeleteModal();
+    openDeleteModal();
+  }
+
+  function handleChatFolderChange() {
+    markRenderChatFolderModal();
+    openChatFolderModal();
+  }
+
+  const contextActions = useChatContextActions({
+    chat,
+    user,
+    handleDelete,
+    handleChatFolderChange,
+    folderId,
+    isPinned,
+    isMuted,
+    canChangeFolder,
+  });
+
+  const lang = useLang();
+  const lastMessage1 = {
+    id:1,
+    content:{
+
+    },
+    chatId:"",
+    isOutgoing:false,
+    date:(+new Date()) / 1000
+  }
+  // if (!chat) {
+  //   return undefined;
+  // }
+  function renderLastMessageOrTyping() {
+    if (typingStatus && lastMessage && typingStatus.timestamp > lastMessage.date * 1000) {
+      return <TypingStatus typingStatus={typingStatus} />;
+    }
+
+    if (draft?.text.length) {
+      return (
+        <p className="last-message" dir={lang.isRtl ? 'auto' : 'ltr'}>
+          <span className="draft">{lang('Draft')}</span>
+          {renderText(draft.text)}
+        </p>
+      );
+    }
+
+    if (!lastMessage1) {
+      return undefined;
+    }
+
+    if (isAction) {
+      const isChat = chat && (isChatChannel(chat) || lastMessage.senderId === lastMessage.chatId);
+
+      return (
+        <p className="last-message" dir={lang.isRtl ? 'auto' : 'ltr'}>
+          {renderActionMessageText(
+            lang,
+            lastMessage,
+            !isChat ? lastMessageSender : undefined,
+            isChat ? chat : undefined,
+            actionTargetUsers,
+            actionTargetMessage,
+            actionTargetChatId,
+            { asTextWithSpoilers: true },
+          )}
+        </p>
+      );
+    }
+
+    // const senderName = getMessageSenderName(lang, chatId, lastMessageSender);
+
+    return (
+      <p className="last-message" dir={lang.isRtl ? 'auto' : 'ltr'}>
+        <span className="sender-name">{"Joseph"}</span>
+        <span className="colon">:</span>
+        message text
+      </p>
+    );
+  }
+  // const isGroup = !isUserId(chatId)
+  const isGroup = false;
+  const className = buildClassName(
+    'Chat chat-item-clickable',
+    !isGroup ? 'private' : 'group',
+    isSelected && 'selected',
+  );
+  // const isVerified = chat.isVerified
+  const isVerified = true;
+
+  return (
+    <ListItem
+      ref={ref}
+      className={className}
+      style={style}
+      ripple={!IS_SINGLE_COLUMN_LAYOUT}
+      contextActions={contextActions}
+      onClick={handleClick}
+    >
+      <div className="status">
+        <Avatar
+          chat={chat}
+          user={user}
+          userStatus={userStatus}
+          isSavedMessages={user?.isSelf}
+          lastSyncTime={lastSyncTime}
+        />
+        {/*{chat.isCallActive && chat.isCallNotEmpty && (*/}
+        {/*  <ChatCallStatus isSelected={isSelected} isActive={animationLevel !== 0} />*/}
+        {/*)}*/}
+      </div>
+      <div className="info">
+        <div className="title">
+          <h3>BTC</h3>
+          {isVerified && <VerifiedIcon />}
+          {isMuted && <i className="icon-muted" />}
+          <LastMessageMeta
+            message={lastMessage1}
+            outgoingStatus={lastMessageOutgoingStatus}
+          />
+        </div>
+        <div className="subtitle">
+          {renderLastMessageOrTyping()}
+          {/*<Badge chat={chat} isPinned={isPinned} isMuted={isMuted} />*/}
+        </div>
+      </div>
+
+      {shouldRenderChatFolderModal && (
+        <ChatFolderModal
+          isOpen={isChatFolderModalOpen}
+          onClose={closeChatFolderModal}
+          onCloseAnimationEnd={unmarkRenderChatFolderModal}
+          chatId={chatId}
+        />
+      )}
+    </ListItem>
+  );
+};
+
+function renderSummary(lang: LangFn, message: ApiMessage, blobUrl?: string, isRoundVideo?: boolean) {
+  if (!blobUrl) {
+    return renderMessageSummary(lang, message);
+  }
+
+  return (
+    <span className="media-preview">
+      <img src={blobUrl} alt="" className={isRoundVideo ? 'round' : undefined} />
+      {getMessageVideo(message) && <i className="icon-play" />}
+      {renderMessageSummary(lang, message, true)}
+    </span>
+  );
+}
+
+export default memo(withGlobal<OwnProps>(
+  (global, { chatId }): StateProps => {
+    const chat = selectChat(global, chatId);
+    if (!chat || !chat.lastMessage) {
+      return {};
+    }
+    const {
+      senderId,
+      replyToMessageId,
+      isOutgoing,
+    } = chat.lastMessage;
+    const lastMessageSender = senderId ? selectUser(global, senderId) : undefined;
+    const lastMessageAction = getMessageAction(chat.lastMessage);
+    const actionTargetMessage = lastMessageAction && replyToMessageId
+      ? selectChatMessage(global, chat.id, replyToMessageId)
+      : undefined;
+    const {
+      targetUserIds: actionTargetUserIds,
+      targetChatId: actionTargetChatId,
+    } = lastMessageAction || {};
+    const privateChatUserId = getPrivateChatUserId(chat);
+    const {
+      chatId: currentChatId,
+      threadId: currentThreadId,
+      type: messageListType,
+    } = selectCurrentMessageList(global) || {};
+    const isSelected = chatId === currentChatId && currentThreadId === MAIN_THREAD_ID;
+    // @ts-ignore
+    return {
+      chat,
+      isMuted: selectIsChatMuted(chat, selectNotifySettings(global), selectNotifyExceptions(global)),
+      lastMessageSender,
+      actionTargetUserIds,
+      actionTargetChatId,
+      actionTargetMessage,
+      draft: selectDraft(global, chatId, MAIN_THREAD_ID),
+      animationLevel: global.settings.byKey.animationLevel,
+      isSelected,
+      canScrollDown: isSelected && messageListType === 'thread',
+      canChangeFolder: Boolean(global.chatFolders.orderedIds?.length),
+      lastSyncTime: global.lastSyncTime,
+      ...(isOutgoing && { lastMessageOutgoingStatus: selectOutgoingStatus(global, chat.lastMessage) }),
+      ...(privateChatUserId && {
+        user: selectUser(global, privateChatUserId),
+        userStatus: selectUserStatus(global, privateChatUserId),
+      }),
+    };
+  },
+)(ChatItem));
