@@ -24,7 +24,8 @@
     "test:record": "playwright codegen localhost:1235",
     "prepare": "husky install",
     "statoscope:validate": "statoscope validate --input  public/build-stats.json",
-    "statoscope:validate-diff": "statoscope validate --input input.json --reference reference.json"
+    "statoscope:validate-diff": "statoscope validate --input input.json --reference reference.json",
+    "clean:map": "rm -rf dist/*.map"
   },
   "engines": {
     "node": "^16.13",
