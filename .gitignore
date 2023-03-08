@@ -17,4 +17,4 @@ dist/statoscope-report.html
 dist/build-stats.json
 public/build-stats.json
 public/statoscope-report.html
-
+wrangler.toml

@@ -25,7 +25,10 @@
     "prepare": "husky install",
     "statoscope:validate": "statoscope validate --input  public/build-stats.json",
     "statoscope:validate-diff": "statoscope validate --input input.json --reference reference.json",
-    "clean:map": "rm -rf dist/*.map"
+    "clean:map": "rm -rf dist/*.map && rm -rf dist/statoscope-report.html dist/build-stats.json",
+    "wr:build:prod": "npm run build:production && npm run clean:map",
+    "wr:deploy": "wrangler publish",
+    "wr:dev": "wrangler dev --local"
   },
   "engines": {
     "node": "^16.13",
@@ -43,6 +46,7 @@
   "author": "Alexander Zinchuk (alexander@zinchuk.com)",
   "license": "GPL-3.0-or-later",
   "devDependencies": {
+    "wrangler": "^2.0.0",
     "@babel/core": "^7.17.9",
     "@babel/plugin-proposal-class-properties": "^7.16.7",
     "@babel/plugin-proposal-nullish-coalescing-operator": "^7.16.7",
